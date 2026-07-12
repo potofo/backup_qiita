@@ -355,6 +355,7 @@ type ArticlePaths = { dir: string; viewMd: string; originalMd: string; metaJson:
 - `add -A` → 変更ゼロならコミットしない(6.4)。リネームはGitの自動検出に委ねる(6.5)
 - コミットは常に `backup` ブランチで行う(6.7)。初期化時は初期ブランチを `backup` とし、既存リポジトリが別ブランチにある場合は `backup` へ切り替える(`backup` 未存在時は現在の履歴を引き継いでリネーム作成)
 - `backup` ブランチはローカル専用(6.8)。ensureRepo時に pre-push フックを設置し、`refs/heads/backup` のpushを手動操作を含めて拒否する。ユーザ独自のフックが既にある場合は上書きせず警告ログのみ
+- バックアップ先が別リポジトリ(ツール本体等)の配下にある場合でも、**リポジトリルート判定**(`checkIsRepo(root)`)で独立初期化する(6.1)。さらに全Git操作の前に `rev-parse --show-toplevel` がバックアップ先自身であることを検証し、一致しない場合は外側のリポジトリに触れる前に中断する(安全網)
 
 **Contracts**: Service [x]
 

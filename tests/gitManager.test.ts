@@ -163,6 +163,42 @@ describe("GitManager(2.4)", () => {
     expect(content).not.toContain("qiita-backup-tool");
   });
 
+  it("親Gitリポジトリ配下のバックアップ先でも、親を操作せず独立リポジトリを初期化する(6.1 / F-GIT-01)", async () => {
+    // ツール本体リポジトリに相当する「親リポジトリ」を用意する
+    const parentDir = mkdtempSync(join(tmpdir(), "qbt-parent-"));
+    const parent = simpleGit(parentDir);
+    await parent.init(["--initial-branch=main"]);
+    await parent.addConfig("user.name", "test", false, "local");
+    await parent.addConfig("user.email", "test@localhost", false, "local");
+    writeFileSync(join(parentDir, "app.ts"), "// tool source", "utf8");
+    await parent.add(["-A"]);
+    await parent.commit("parent commit");
+
+    // 親リポジトリ配下にバックアップ先を作る(BACKUP_DIR=./backups 相当)
+    const nested = join(parentDir, "backups");
+    mkdirSync(nested, { recursive: true });
+    const manager = await createGitManager(nested);
+    const ensured = await manager.ensureRepo();
+    expect(ensured.ok).toBe(true);
+
+    writeFileSync(join(nested, "index.json"), "{}", "utf8");
+    const result = await manager.commitRun(makeSummary());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).not.toBeNull();
+
+    // バックアップ先自身が独立したリポジトリとして初期化されている
+    expect(existsSync(join(nested, ".git", "HEAD"))).toBe(true);
+    const childBranch = (await simpleGit(nested).raw(["symbolic-ref", "--short", "HEAD"])).trim();
+    expect(childBranch).toBe("backup");
+    expect((await simpleGit(nested).log()).total).toBe(1);
+
+    // 親リポジトリは一切変更されない(ブランチ名・コミット数・作業ツリー)
+    const parentBranch = (await parent.raw(["symbolic-ref", "--short", "HEAD"])).trim();
+    expect(parentBranch).toBe("main");
+    expect((await parent.log()).total).toBe(1);
+    expect(existsSync(join(parentDir, ".git", "hooks", "pre-push"))).toBe(false);
+  });
+
   it("Git利用不可の環境では警告状態を公開し、以後の操作を無害化する(6.6)", async () => {
     const manager = await createGitManager(repoDir, undefined, {
       gitBinary: "C:\\nonexistent\\git-not-installed.exe",

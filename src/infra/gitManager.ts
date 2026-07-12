@@ -6,10 +6,10 @@
  * - コミットは常に backup ブランチで行う(6.7 / F-GIT-08)
  * - backup ブランチはローカル専用。pre-pushフックで手動pushも拒否する(6.8 / F-GIT-09)
  */
-import { simpleGit, type SimpleGit } from "simple-git";
+import { simpleGit, CheckRepoActions, type SimpleGit } from "simple-git";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { CommitInfo, GitError, Result, RunSummary } from "../types/index.js";
 import { ok, err } from "../types/index.js";
 import type { Logger } from "../config/logger.js";
@@ -72,14 +72,26 @@ class GitManagerImpl implements GitManager {
     if (!this.available || !this.git) return ok(undefined); // 無害化(6.6)
     try {
       await mkdir(this.repoDir, { recursive: true });
-      const isRepo = await this.git.checkIsRepo();
-      if (!isRepo) {
+      // 「リポジトリ配下か」ではなく「バックアップ先自身がリポジトリのルートか」で判定する。
+      // ツール本体リポジトリ等の配下にBACKUP_DIRがある場合に親リポジトリを誤操作しないため(F-GIT-01)
+      const isRepoRoot = await this.git.checkIsRepo(CheckRepoActions.IS_REPO_ROOT);
+      if (!isRepoRoot) {
         await this.git.init();
         // コミットに必要なユーザ識別をリポジトリローカルに設定(グローバル設定へ影響させない)
         await this.git.addConfig("user.name", "qiita-backup-tool", false, "local");
         await this.git.addConfig("user.email", "qiita-backup-tool@localhost", false, "local");
         this.logger?.info("バックアップ用Gitリポジトリを初期化しました", { dir: this.repoDir });
       }
+
+      // 安全網: 以降の全Git操作の対象がバックアップ先自身であることを検証する。
+      // 万一外側のリポジトリを指している場合は、親リポジトリを壊す前に中断する
+      const toplevel = resolve((await this.git.revparse(["--show-toplevel"])).trim());
+      if (toplevel.toLowerCase() !== resolve(this.repoDir).toLowerCase()) {
+        const message = `Git操作の対象(${toplevel})がバックアップ先(${this.repoDir})と一致しないため中断しました`;
+        this.logger?.error(message);
+        return err({ kind: "gitFailed", message });
+      }
+
       await this.ensureBackupBranch();
       await this.ensurePrePushHook();
       return ok(undefined);
