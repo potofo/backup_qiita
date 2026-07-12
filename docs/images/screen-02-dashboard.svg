@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" font-family="'Segoe UI','Yu Gothic UI','Hiragino Sans',sans-serif">
+  <style>
+    .req { font-size: 10px; fill: #8e44ad; font-weight: bold; }
+    .leader { stroke: #8e44ad; stroke-width: 1; stroke-dasharray: 3 3; fill: none; opacity: 0.6; }
+    .th { font-size: 12px; font-weight: bold; fill: #5a6472; }
+    .td { font-size: 12px; fill: #333; }
+    .num { font-size: 12px; fill: #333; text-anchor: middle; }
+    .link { font-size: 12px; fill: #1a73e8; text-decoration: underline; }
+    .chipt { font-size: 10.5px; font-weight: bold; }
+  </style>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="1000" height="680" fill="#f5f6f8"/>
+
+  <!-- ブラウザウィンドウ -->
+  <rect x="20" y="20" width="960" height="640" rx="8" fill="#ffffff" stroke="#c4c9d0"/>
+  <rect x="20" y="20" width="960" height="36" rx="8" fill="#e8eaed"/>
+  <rect x="20" y="42" width="960" height="14" fill="#e8eaed"/>
+  <circle cx="42" cy="38" r="5" fill="#e74c3c"/>
+  <circle cx="60" cy="38" r="5" fill="#f1c40f"/>
+  <circle cx="78" cy="38" r="5" fill="#2ecc71"/>
+  <rect x="110" y="27" width="300" height="22" rx="11" fill="#ffffff" stroke="#d0d4da"/>
+  <text x="124" y="42" font-size="12" fill="#666">http://localhost:3000</text>
+
+  <!-- アプリヘッダ -->
+  <rect x="20" y="56" width="960" height="48" fill="#55c500"/>
+  <text x="40" y="86" font-size="18" font-weight="bold" fill="#ffffff">Qiita記事バックアップツール</text>
+  <rect x="660" y="68" width="200" height="24" rx="12" fill="#ffffff"/>
+  <circle cx="676" cy="80" r="5" fill="#55c500"/>
+  <text x="688" y="84" font-size="12" fill="#3d8b1f">接続済(@nagura)</text>
+  <text x="880" y="84" font-size="12" fill="#ffffff" text-decoration="underline">接続設定</text>
+
+  <!-- 状態集計タイル (F-ST-05) -->
+  <g>
+    <rect x="40" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <text x="54" y="140" font-size="11" fill="#666">全記事</text>
+    <text x="54" y="168" font-size="20" font-weight="bold" fill="#333">42</text>
+
+    <rect x="194" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <circle cx="210" cy="136" r="4" fill="#55c500"/>
+    <text x="220" y="140" font-size="11" fill="#666">最新</text>
+    <text x="208" y="168" font-size="20" font-weight="bold" fill="#3d8b1f">33</text>
+
+    <rect x="348" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <circle cx="364" cy="136" r="4" fill="#9aa4b0"/>
+    <text x="374" y="140" font-size="11" fill="#666">未バックアップ</text>
+    <text x="362" y="168" font-size="20" font-weight="bold" fill="#5a6472">5</text>
+
+    <rect x="502" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <circle cx="518" cy="136" r="4" fill="#f39c12"/>
+    <text x="528" y="140" font-size="11" fill="#666">Qiita更新あり</text>
+    <text x="516" y="168" font-size="20" font-weight="bold" fill="#b96b00">3</text>
+
+    <rect x="656" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <circle cx="672" cy="136" r="4" fill="#e1c410"/>
+    <text x="682" y="140" font-size="11" fill="#666">ローカル変更あり</text>
+    <text x="670" y="168" font-size="20" font-weight="bold" fill="#8f7500">1</text>
+
+    <rect x="810" y="120" width="142" height="64" rx="6" fill="#ffffff" stroke="#d0d4da"/>
+    <circle cx="826" cy="136" r="4" fill="#e74c3c"/>
+    <text x="836" y="140" font-size="11" fill="#666">Qiita側削除</text>
+    <text x="824" y="168" font-size="20" font-weight="bold" fill="#c0392b">0</text>
+  </g>
+  <text x="922" y="112" class="req">F-ST-05</text>
+
+  <!-- ツールバー -->
+  <g>
+    <rect x="40" y="204" width="110" height="34" rx="6" fill="#ffffff" stroke="#9aa4b0"/>
+    <text x="95" y="226" font-size="12" fill="#5a6472" text-anchor="middle">一覧再取得</text>
+
+    <rect x="162" y="204" width="160" height="34" rx="6" fill="#55c500"/>
+    <text x="242" y="226" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">差分バックアップ実行</text>
+
+    <rect x="334" y="204" width="140" height="34" rx="6" fill="#ffffff" stroke="#55c500"/>
+    <text x="404" y="226" font-size="12" fill="#3d8b1f" text-anchor="middle">全件バックアップ</text>
+
+    <rect x="486" y="204" width="150" height="34" rx="6" fill="#ffffff" stroke="#55c500"/>
+    <text x="561" y="226" font-size="12" fill="#3d8b1f" text-anchor="middle">選択をバックアップ</text>
+
+    <rect x="700" y="204" width="118" height="34" rx="6" fill="#ffffff" stroke="#c4c9d0"/>
+    <text x="712" y="226" font-size="12" fill="#5a6472">状態: すべて ▼</text>
+    <rect x="828" y="204" width="124" height="34" rx="6" fill="#ffffff" stroke="#c4c9d0"/>
+    <text x="840" y="226" font-size="12" fill="#5a6472">Qiita更新順 ▼</text>
+  </g>
+  <text x="152" y="198" class="req">F-LIST-04</text>
+  <text x="330" y="198" class="req">F-BK-03(既定)</text>
+  <text x="440" y="198" class="req">F-BK-01</text>
+  <text x="600" y="198" class="req">F-BK-02</text>
+
+  <!-- 記事一覧テーブル (F-LIST-03/05 / F-ST-02) -->
+  <rect x="40" y="256" width="912" height="276" fill="#ffffff" stroke="#d0d4da"/>
+  <rect x="40" y="256" width="912" height="32" fill="#f2f3f5"/>
+  <rect x="48" y="265" width="14" height="14" rx="2" fill="#ffffff" stroke="#9aa4b0"/>
+  <text x="76" y="277" class="th">状態</text>
+  <text x="200" y="277" class="th">タイトル</text>
+  <text x="472" y="277" class="th" text-anchor="middle">コメント</text>
+  <text x="524" y="277" class="th" text-anchor="middle">LGTM</text>
+  <text x="578" y="277" class="th" text-anchor="middle">ストック</text>
+  <text x="610" y="277" class="th">Qiita更新日時</text>
+  <text x="730" y="277" class="th">最終バックアップ</text>
+  <text x="848" y="277" class="th">操作</text>
+  <path class="leader" d="M 106 272 L 128 250"/>
+  <text x="118" y="248" class="req">F-ST-02</text>
+  <path class="leader" d="M 524 262 L 524 250"/>
+  <text x="488" y="246" class="req">F-LIST-02/05</text>
+
+  <!-- 行1: 最新 -->
+  <line x1="40" y1="328" x2="952" y2="328" stroke="#eceef1"/>
+  <rect x="48" y="301" width="14" height="14" rx="2" fill="#55c500"/>
+  <text x="51" y="313" font-size="11" fill="#ffffff">✓</text>
+  <rect x="76" y="298" width="80" height="20" rx="10" fill="#e6f4e0"/>
+  <circle cx="89" cy="308" r="3.5" fill="#55c500"/>
+  <text x="98" y="312" class="chipt" fill="#3d8b1f">最新</text>
+  <text x="200" y="313" class="td">Reactで作るローカルWebツール入門</text>
+  <text x="472" y="313" class="num">3</text>
+  <text x="524" y="313" class="num">41</text>
+  <text x="578" y="313" class="num">25</text>
+  <text x="610" y="313" class="td">2026-06-30 10:12</text>
+  <text x="730" y="313" class="td">2026-07-01 09:00</text>
+  <text x="848" y="313" class="link">フォルダを開く</text>
+
+  <!-- 行2: Qiita更新あり -->
+  <line x1="40" y1="368" x2="952" y2="368" stroke="#eceef1"/>
+  <rect x="48" y="341" width="14" height="14" rx="2" fill="#ffffff" stroke="#9aa4b0"/>
+  <rect x="76" y="338" width="108" height="20" rx="10" fill="#fdf0e0"/>
+  <circle cx="89" cy="348" r="3.5" fill="#f39c12"/>
+  <text x="98" y="352" class="chipt" fill="#b96b00">Qiita更新あり</text>
+  <text x="200" y="353" class="td">Docker Composeで開発環境を整える</text>
+  <text x="472" y="353" class="num">8</text>
+  <text x="524" y="353" class="num">120</text>
+  <text x="578" y="353" class="num">96</text>
+  <text x="610" y="353" class="td">2026-07-10 18:24</text>
+  <text x="730" y="353" class="td">2026-06-20 09:00</text>
+  <text x="848" y="353" class="link">フォルダを開く</text>
+
+  <!-- 行3: 未バックアップ -->
+  <line x1="40" y1="408" x2="952" y2="408" stroke="#eceef1"/>
+  <rect x="48" y="381" width="14" height="14" rx="2" fill="#55c500"/>
+  <text x="51" y="393" font-size="11" fill="#ffffff">✓</text>
+  <rect x="76" y="378" width="108" height="20" rx="10" fill="#eef0f3"/>
+  <circle cx="89" cy="388" r="3.5" fill="#9aa4b0"/>
+  <text x="98" y="392" class="chipt" fill="#5a6472">未バックアップ</text>
+  <text x="200" y="393" class="td">PowerShellスクリプト小技集</text>
+  <text x="472" y="393" class="num">0</text>
+  <text x="524" y="393" class="num">12</text>
+  <text x="578" y="393" class="num">9</text>
+  <text x="610" y="393" class="td">2026-07-08 12:00</text>
+  <text x="730" y="393" class="td">—</text>
+  <text x="848" y="393" class="td" fill="#aaa">—</text>
+
+  <!-- 行4: ローカル変更あり -->
+  <line x1="40" y1="448" x2="952" y2="448" stroke="#eceef1"/>
+  <rect x="48" y="421" width="14" height="14" rx="2" fill="#ffffff" stroke="#9aa4b0"/>
+  <rect x="76" y="418" width="116" height="20" rx="10" fill="#fff8dd"/>
+  <circle cx="89" cy="428" r="3.5" fill="#e1c410"/>
+  <text x="98" y="432" class="chipt" fill="#8f7500">ローカル変更あり</text>
+  <text x="200" y="433" class="td">Qiita API v2の使い方まとめ</text>
+  <text x="472" y="433" class="num">5</text>
+  <text x="524" y="433" class="num">67</text>
+  <text x="578" y="433" class="num">58</text>
+  <text x="610" y="433" class="td">2026-05-11 08:30</text>
+  <text x="730" y="433" class="td">2026-06-01 10:00</text>
+  <text x="848" y="433" class="link">フォルダを開く</text>
+  <path class="leader" d="M 192 428 L 204 445"/>
+  <text x="140" y="462" class="req">F-ST-03(再バックアップ時に上書き確認)</text>
+
+  <!-- 行5: Qiitaから削除済 -->
+  <line x1="40" y1="488" x2="952" y2="488" stroke="#eceef1"/>
+  <rect x="48" y="461" width="14" height="14" rx="2" fill="#f2f3f5" stroke="#d0d4da"/>
+  <rect x="76" y="458" width="116" height="20" rx="10" fill="#fdeaea"/>
+  <circle cx="89" cy="468" r="3.5" fill="#e74c3c"/>
+  <text x="98" y="472" class="chipt" fill="#c0392b">Qiitaから削除済</text>
+  <text x="200" y="473" class="td" fill="#888">VSCode拡張の作り方</text>
+  <text x="472" y="473" class="num" fill="#aaa">—</text>
+  <text x="524" y="473" class="num" fill="#aaa">—</text>
+  <text x="578" y="473" class="num" fill="#aaa">—</text>
+  <text x="610" y="473" class="td" fill="#888">—</text>
+  <text x="730" y="473" class="td">2026-04-02 11:00</text>
+  <text x="848" y="473" class="link">フォルダを開く</text>
+  <path class="leader" d="M 604 468 L 620 500"/>
+  <text x="540" y="512" class="req">F-ST-04(ローカルは自動削除しない)</text>
+
+  <!-- 行6: 最新 -->
+  <line x1="40" y1="532" x2="952" y2="532" stroke="#d0d4da"/>
+  <rect x="48" y="501" width="14" height="14" rx="2" fill="#ffffff" stroke="#9aa4b0"/>
+  <rect x="76" y="498" width="80" height="20" rx="10" fill="#e6f4e0"/>
+  <circle cx="89" cy="508" r="3.5" fill="#55c500"/>
+  <text x="98" y="512" class="chipt" fill="#3d8b1f">最新</text>
+  <text x="200" y="513" class="td">TypeScriptの型パズル練習帳</text>
+  <text x="472" y="513" class="num">2</text>
+  <text x="524" y="513" class="num">33</text>
+  <text x="578" y="513" class="num">21</text>
+  <text x="610" y="513" class="td">2026-03-15 09:45</text>
+  <text x="730" y="513" class="td">2026-06-01 10:01</text>
+  <text x="848" y="513" class="link">フォルダを開く</text>
+
+  <!-- フッタ -->
+  <text x="40" y="562" font-size="12" fill="#888">42件中 1〜6件を表示(ページ 1 / 7)</text>
+  <text x="820" y="562" class="link">バックアップ履歴を表示</text>
+  <path class="leader" d="M 900 566 L 900 580"/>
+  <text x="852" y="592" class="req">F-ST-06</text>
+
+  <text x="40" y="640" font-size="11" fill="#aaa">記事一覧・ダッシュボード画面 — 一覧表示(F-LIST-03)/反応数表示(F-LIST-05)/状態分類(F-ST-02)/実行操作(F-BK-01〜03)</text>
+</svg>

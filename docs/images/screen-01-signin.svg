@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 680" font-family="'Segoe UI','Yu Gothic UI','Hiragino Sans',sans-serif">
+  <style>
+    .req { font-size: 10px; fill: #8e44ad; font-weight: bold; }
+    .leader { stroke: #8e44ad; stroke-width: 1; stroke-dasharray: 3 3; fill: none; opacity: 0.6; }
+  </style>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="900" height="680" fill="#f5f6f8"/>
+
+  <!-- ブラウザウィンドウ -->
+  <rect x="20" y="20" width="860" height="640" rx="8" fill="#ffffff" stroke="#c4c9d0"/>
+  <rect x="20" y="20" width="860" height="36" rx="8" fill="#e8eaed"/>
+  <rect x="20" y="42" width="860" height="14" fill="#e8eaed"/>
+  <circle cx="42" cy="38" r="5" fill="#e74c3c"/>
+  <circle cx="60" cy="38" r="5" fill="#f1c40f"/>
+  <circle cx="78" cy="38" r="5" fill="#2ecc71"/>
+  <rect x="110" y="27" width="300" height="22" rx="11" fill="#ffffff" stroke="#d0d4da"/>
+  <text x="124" y="42" font-size="12" fill="#666">http://localhost:3000</text>
+
+  <!-- アプリヘッダ -->
+  <rect x="20" y="56" width="860" height="48" fill="#55c500"/>
+  <text x="40" y="86" font-size="18" font-weight="bold" fill="#ffffff">Qiita記事バックアップツール</text>
+  <rect x="700" y="68" width="160" height="24" rx="12" fill="#ffffff"/>
+  <circle cx="716" cy="80" r="5" fill="#9aa4b0"/>
+  <text x="728" y="84" font-size="12" fill="#5a6472">未確認</text>
+  <path class="leader" d="M 862 92 L 862 116"/>
+  <text x="820" y="128" class="req">F-AUTH-04</text>
+
+  <!-- 接続確認カード -->
+  <rect x="250" y="140" width="400" height="492" rx="8" fill="#ffffff" stroke="#d0d4da"/>
+  <text x="270" y="176" font-size="16" font-weight="bold" fill="#333">Qiita接続確認(アクセストークン)</text>
+
+  <!-- .env情報 -->
+  <rect x="270" y="192" width="360" height="52" rx="6" fill="#f5f6f8"/>
+  <text x="284" y="212" font-size="12" fill="#666">.env の QIITA_ACCESS_TOKEN を使用します</text>
+  <text x="284" y="232" font-size="12" fill="#333">トークン:  ************************8d5a(末尾のみ表示)</text>
+
+  <!-- 接続確認ボタン -->
+  <rect x="270" y="256" width="360" height="36" rx="6" fill="#55c500"/>
+  <text x="450" y="279" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">接続確認</text>
+  <path class="leader" d="M 652 274 L 668 274"/>
+  <text x="672" y="278" class="req">F-AUTH-01</text>
+
+  <!-- 成功時の表示 -->
+  <text x="450" y="318" font-size="11" fill="#999" text-anchor="middle">― 接続成功時の表示 ―</text>
+  <rect x="270" y="328" width="360" height="50" rx="6" fill="#e6f4e0" stroke="#a5d68a"/>
+  <text x="284" y="348" font-size="12" font-weight="bold" fill="#3d8b1f">✓ 接続済: @nagura</text>
+  <text x="284" y="368" font-size="12" fill="#3d8b1f">投稿記事数: 42件(スコープ: read_qiita)</text>
+  <path class="leader" d="M 652 353 L 668 353"/>
+  <text x="672" y="357" class="req">F-AUTH-02</text>
+
+  <!-- 未設定・無効時の表示 -->
+  <text x="450" y="402" font-size="11" fill="#999" text-anchor="middle">― トークン未設定・無効(401)時の表示 ―</text>
+  <rect x="270" y="412" width="360" height="204" rx="6" fill="#fdecea" stroke="#f5b8b1"/>
+  <text x="284" y="434" font-size="11.5" font-weight="bold" fill="#c0392b">⚠ トークンが未設定または無効です(401)</text>
+  <path class="leader" d="M 652 430 L 668 430"/>
+  <text x="672" y="434" class="req">F-AUTH-03</text>
+
+  <!-- 発行手順ガイド -->
+  <text x="284" y="458" font-size="11" font-weight="bold" fill="#833">発行手順(Qiitaにサインイン後):</text>
+  <text x="284" y="476" font-size="10.5" fill="#833">[ユーザアイコン] ⇒ [設定] ⇒ [アプリケーション]</text>
+  <text x="284" y="492" font-size="10.5" fill="#833">⇒ [個人用アクセストークン] ⇒ 「新しくトークンを発行する」</text>
+  <text x="284" y="508" font-size="10" fill="#a66">(スコープは read_qiita のみ / トークンの表示は発行時の1回のみ)</text>
+  <text x="284" y="530" font-size="11" fill="#1a73e8" text-decoration="underline">発行ページを開く(qiita.com/settings/tokens/new)</text>
+
+  <!-- トークン入力欄 + 接続確認 -->
+  <rect x="284" y="542" width="234" height="30" rx="4" fill="#ffffff" stroke="#c4c9d0"/>
+  <text x="296" y="562" font-size="12" fill="#999">●●●●●●●●●●●●●●●●●●●●</text>
+  <rect x="528" y="542" width="88" height="30" rx="4" fill="#55c500"/>
+  <text x="572" y="562" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">接続確認</text>
+  <path class="leader" d="M 652 557 L 668 557"/>
+  <text x="672" y="561" class="req">F-AUTH-07</text>
+
+  <!-- .env保存チェックボックス -->
+  <rect x="286" y="584" width="12" height="12" rx="2" fill="#55c500"/>
+  <text x="289" y="594" font-size="10" fill="#ffffff">✓</text>
+  <text x="304" y="594" font-size="11" fill="#833">接続成功時に .env に保存する(保存しない場合はメモリ上のみ)</text>
+  <path class="leader" d="M 652 590 L 668 590"/>
+  <text x="672" y="594" class="req">F-AUTH-08</text>
+
+  <text x="450" y="650" font-size="11" fill="#aaa" text-anchor="middle">トークンは画面・ログに全文表示しません(F-AUTH-05 / N-SEC-02)。入力欄はマスク表示。</text>
+</svg>

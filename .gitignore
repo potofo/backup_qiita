@@ -1,0 +1,20 @@
+# 認証情報(N-SEC-04)
+.env
+
+# バックアップデータ(独立Gitリポジトリのため本体リポジトリでは無視)
+backup/
+backups/
+
+# 実行ログ
+logs/
+
+# Node.js
+node_modules/
+dist/
+public/
+
+# Playwright MCP(ブラウザ検証時の作業ファイル)
+.playwright-mcp/
+
+# 公開前のQiita記事ドラフト
+docs/qiita-article.md

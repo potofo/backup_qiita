@@ -1,0 +1,32 @@
+{
+  "name": "qiita-backup-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Qiita記事バックアップツール — 自分の全記事(限定共有含む)のMarkdownと画像をローカルへ単方向バックアップするローカルWebツール",
+  "license": "MIT",
+  "author": "potofo",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-web.mjs",
+    "start": "npm run build && node dist/http/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "perf": "npm run build && node dist/scripts/perf-test.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "simple-git": "^3.36.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.10.9",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

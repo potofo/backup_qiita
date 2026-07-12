@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Qiita記事バックアップツール</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2355c500'/%3E%3Ctext x='8' y='12' font-size='10' fill='white' text-anchor='middle' font-family='sans-serif'%3EQ%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Qiita記事バックアップツール</h1>
+    <div class="header-right">
+      <span id="connection-badge" class="badge badge-unknown">未確認</span>
+      <a href="#connection" id="nav-connection" class="header-link">接続設定</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- ================= 接続確認画面(screen-01) ================= -->
+    <section id="view-connection" hidden>
+      <div class="card">
+        <h2>Qiita接続確認(アクセストークン)</h2>
+        <p class="muted">.env の QIITA_ACCESS_TOKEN を使用します</p>
+        <p>トークン: <span id="masked-token" class="mono">(未設定)</span>(末尾のみ表示)</p>
+        <button id="btn-verify" class="primary">接続確認</button>
+
+        <div id="conn-success" class="success-box" hidden>
+          <p id="conn-success-user"></p>
+          <p id="conn-success-count"></p>
+        </div>
+
+        <div id="conn-error" hidden>
+          <div class="error-box" id="conn-error-message"></div>
+          <div class="warn-box">
+            <p><strong>発行手順(Qiitaにサインイン後):</strong></p>
+            <p>[ユーザアイコン] ⇒ [設定] ⇒ [アプリケーション] ⇒ [個人用アクセストークン] ⇒ 「新しくトークンを発行する」</p>
+            <p class="muted">(スコープは read_qiita のみ / トークンの表示は発行時の1回のみ)</p>
+            <p><a href="https://qiita.com/settings/tokens/new" target="_blank" rel="noopener noreferrer">発行ページを開く(qiita.com/settings/tokens/new)</a></p>
+          </div>
+          <div class="token-form">
+            <input type="password" id="token-input" placeholder="アクセストークンを入力(マスク表示)" autocomplete="off" />
+            <label class="checkbox-label">
+              <input type="checkbox" id="save-token" />
+              接続成功時に .env に保存する(保存しない場合はメモリ上のみ)
+            </label>
+            <button id="btn-verify-input" class="primary">接続確認</button>
+          </div>
+        </div>
+        <p class="muted">トークンは画面・ログに全文表示しません。入力欄はマスク表示。</p>
+      </div>
+    </section>
+
+    <!-- ================= 記事一覧・ダッシュボード画面(screen-02) ================= -->
+    <section id="view-dashboard" hidden>
+      <div id="git-warning" class="warn-box" hidden>
+        ⚠ Gitが利用できないため、世代管理なし(最新1世代のみ)でバックアップされます。
+      </div>
+      <div class="tiles" id="tiles"></div>
+      <div class="toolbar">
+        <button id="btn-refresh">一覧再取得</button>
+        <button id="btn-backup-diff" class="primary">差分バックアップ実行</button>
+        <button id="btn-backup-all">全件バックアップ</button>
+        <button id="btn-backup-selected">選択をバックアップ</button>
+        <span class="spacer"></span>
+        <label>状態:
+          <select id="filter-status">
+            <option value="">すべて</option>
+            <option value="notBackedUp">未バックアップ</option>
+            <option value="upToDate">最新</option>
+            <option value="qiitaUpdated">Qiita更新あり</option>
+            <option value="localModified">ローカル変更あり</option>
+            <option value="deletedOnQiita">Qiita側削除</option>
+          </select>
+        </label>
+        <label>並び順:
+          <select id="sort-order">
+            <option value="updatedDesc">Qiita更新順(新しい順)</option>
+            <option value="updatedAsc">Qiita更新順(古い順)</option>
+            <option value="titleAsc">タイトル順</option>
+            <option value="statusAsc">状態順</option>
+          </select>
+        </label>
+      </div>
+      <div id="articles-empty" class="card" hidden>
+        <p>記事一覧が未取得です。「一覧再取得」を押してください。</p>
+      </div>
+      <table id="articles-table" hidden>
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="check-all" /></th>
+            <th>状態</th>
+            <th>タイトル</th>
+            <th class="num">コメント</th>
+            <th class="num">LGTM</th>
+            <th class="num">ストック</th>
+            <th>Qiita更新日時</th>
+            <th>最終バックアップ</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="articles-body"></tbody>
+      </table>
+    </section>
+
+    <!-- ================= 実行状況表示(screen-03) ================= -->
+    <section id="view-progress" hidden>
+      <div class="card" id="progress-running">
+        <h2 id="progress-heading">バックアップ実行中…</h2>
+        <div class="progress-outer"><div class="progress-inner" id="progress-bar">0%</div></div>
+        <p id="progress-count">0 / 0 件</p>
+        <p id="progress-current"></p>
+        <div id="rate-limit-notice" class="warn-box" hidden></div>
+        <div id="run-error-notice" class="error-box" hidden></div>
+        <button id="btn-cancel" class="danger">中断</button>
+        <h3>記事単位の結果ログ</h3>
+        <div class="log-list" id="progress-log"></div>
+        <p class="muted">※ 中断しても完了済みの記事のバックアップは保持されます</p>
+      </div>
+
+      <div class="card" id="progress-summary" hidden>
+        <h2 id="summary-heading">バックアップ完了</h2>
+        <div class="tiles">
+          <div class="tile"><div class="label">対象</div><div class="num" id="sum-total">0 件</div></div>
+          <div class="tile"><div class="label">成功</div><div class="num ok-num" id="sum-succeeded">0 件</div></div>
+          <div class="tile"><div class="label">失敗</div><div class="num ng-num" id="sum-failed">0 件</div></div>
+        </div>
+        <div id="sum-commit" class="muted"></div>
+        <div id="image-failures-block" hidden>
+          <h3 id="image-failures-heading">画像取得失敗一覧</h3>
+          <table>
+            <thead><tr><th>記事</th><th>画像URL</th><th>理由</th></tr></thead>
+            <tbody id="image-failures-body"></tbody>
+          </table>
+          <p class="muted">※ 取得に失敗した画像の参照は、元のQiita上のURLのまま保存されています</p>
+        </div>
+        <h3>実行履歴</h3>
+        <div class="log-list" id="history-list"></div>
+        <button id="btn-back-to-list" class="primary">記事一覧へ戻る</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
