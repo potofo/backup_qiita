@@ -4,6 +4,7 @@
 # バックアップデータ(独立Gitリポジトリのため本体リポジトリでは無視)
 backup/
 backups/
+backups/index.json
 
 # 実行ログ
 logs/
@@ -18,3 +19,5 @@ public/
 
 # 公開前のQiita記事ドラフト
 docs/qiita-article.md
+
+# 同期したフォルダ
