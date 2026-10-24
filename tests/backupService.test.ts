@@ -170,6 +170,85 @@ describe("BackupService(3.3)", () => {
     expect(stack.mock.itemRequestCount()).toBe(2);
   }, 15_000);
 
+  it("「競合」記事は差分バックアップの対象から除外される(upload-sync 2.5)", async () => {
+    const stack = await buildStack({});
+    // 競合記事を実データで作る: バックアップ済み → ローカル編集 + Qiita側更新
+    stack.mock.setItems([makeRawItem({ id: "c1", title: "競合記事" })]);
+    const first = stack.backup.start({ mode: "diff" });
+    if (!first.ok) return expect.fail("初回バックアップ失敗");
+    await first.value.done;
+
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(stack.root, "競合記事_c1", "競合記事.md"), "# ローカル編集", "utf8");
+    stack.mock.setItems([
+      makeRawItem({ id: "c1", title: "競合記事", updated_at: "2027-01-01T00:00:00+09:00" }),
+    ]);
+
+    // 差分Run: 競合記事は対象0件(上書きされない)
+    const second = stack.backup.start({ mode: "diff" });
+    if (!second.ok) return expect.fail("差分Run開始失敗");
+    const summary = await second.value.done;
+    expect(summary.total).toBe(0);
+    expect(readFileSync(join(stack.root, "競合記事_c1", "競合記事.md"), "utf8")).toBe("# ローカル編集");
+  });
+
+  it("「競合」記事の選択バックアップは上書き確認を要求する(upload-sync 2.6)", async () => {
+    const stack = await buildStack({});
+    stack.backup.updateArticleCache([
+      {
+        id: "c1", title: "競合記事", body: "", url: "", createdAt: "",
+        updatedAt: "", private: false, tags: [], commentsCount: 0, likesCount: 0,
+        stocksCount: 0, status: "conflict", lastBackupAt: "2026-01-01T00:00:00Z",
+        folderName: "競合記事_c1",
+      },
+    ]);
+    const denied = stack.backup.start({ mode: "selected", ids: ["c1"] });
+    expect(denied.ok).toBe(false);
+    if (!denied.ok && denied.error.kind === "needsOverwriteConfirm") {
+      expect(denied.error.articleIds).toEqual(["c1"]);
+    } else {
+      expect.fail(`needsOverwriteConfirm を期待したが: ${JSON.stringify(denied)}`);
+    }
+  });
+
+  it("「ローカル欠落」記事の選択バックアップは上書き確認なしで開始できる(upload-sync 2.3)", async () => {
+    const stack = await buildStack({});
+    stack.mock.setItems([makeRawItem({ id: "x1", title: "欠落記事" })]);
+    stack.backup.updateArticleCache([
+      {
+        id: "x1", title: "欠落記事", body: "", url: "", createdAt: "",
+        updatedAt: "", private: false, tags: [], commentsCount: 0, likesCount: 0,
+        stocksCount: 0, status: "localMissing", lastBackupAt: "2026-01-01T00:00:00Z",
+        folderName: "欠落記事_x1",
+      },
+    ]);
+    // 失われる変更が存在しないため確認なしで復元できる
+    const started = stack.backup.start({ mode: "selected", ids: ["x1"] });
+    expect(started.ok).toBe(true);
+    if (started.ok) {
+      const summary = await started.value.done;
+      expect(summary.succeeded).toBe(1);
+      expect(existsSync(join(stack.root, "欠落記事_x1", "欠落記事.md"))).toBe(true);
+    }
+  });
+
+  it("「ローカル新規」行はバックアップ対象に含めない(ダウンロード不能)", async () => {
+    const stack = await buildStack({});
+    stack.mock.setItems([]);
+    stack.backup.updateArticleCache([
+      {
+        id: "local:draft", title: "下書き", body: "", url: "", createdAt: "",
+        updatedAt: "", private: true, tags: [], commentsCount: 0, likesCount: 0,
+        stocksCount: 0, status: "localNew", lastBackupAt: null, folderName: "draft",
+        invalidReasons: [],
+      },
+    ]);
+    const started = stack.backup.start({ mode: "all" });
+    if (!started.ok) return expect.fail("開始失敗");
+    const summary = await started.value.done;
+    expect(summary.total).toBe(0);
+  });
+
   it("「ローカル変更あり」記事を含むRunは上書き確認済みフラグを要求する(5.5)", async () => {
     const stack = await buildStack({});
     stack.backup.updateArticleCache([

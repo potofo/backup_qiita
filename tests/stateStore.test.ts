@@ -86,19 +86,73 @@ describe("StateStore(3.2)", () => {
       expect(store.classify([item])[0]!.status).toBe("localModified");
     });
 
-    it("ローカルの閲覧用Markdownが削除されている記事も「ローカル変更あり」", async () => {
+    it("ローカルの閲覧用Markdownが削除されている記事は「ローカル欠落」(再バックアップで復元可能 — upload-sync 2.3)", async () => {
       const item = makeItem({ id: "a1" });
       await backUp(item);
       unlinkSync(join(root, "記事a1_a1", "記事a1.md"));
-      expect(store.classify([item])[0]!.status).toBe("localModified");
+      expect(store.classify([item])[0]!.status).toBe("localMissing");
     });
 
-    it("優先順位: Qiita側更新とローカル変更が同時なら「ローカル変更あり」を優先する", async () => {
+    it("Qiita側更新とローカル変更が同時なら「競合」(upload-sync 2.5)", async () => {
       const item = makeItem({ id: "a1" });
       await backUp(item, "# 元の本文");
       writeFileSync(join(root, "記事a1_a1", "記事a1.md"), "# 改変", "utf8");
       const newer = { ...item, updatedAt: "2027-01-01T00:00:00+09:00" };
-      expect(store.classify([newer])[0]!.status).toBe("localModified");
+      expect(store.classify([newer])[0]!.status).toBe("conflict");
+    });
+
+    it("欠落はQiita側更新の有無に関わらず「ローカル欠落」を優先する(決定木: 欠落→競合→改変)", async () => {
+      const item = makeItem({ id: "a1" });
+      await backUp(item);
+      unlinkSync(join(root, "記事a1_a1", "記事a1.md"));
+      const newer = { ...item, updatedAt: "2027-01-01T00:00:00+09:00" };
+      expect(store.classify([newer])[0]!.status).toBe("localMissing");
+    });
+
+    it("ローカル変更のみ(Qiita側更新なし)は従来どおり「ローカル変更あり」(upload-sync 2.2)", async () => {
+      const item = makeItem({ id: "a1" });
+      await backUp(item, "# 元の本文");
+      writeFileSync(join(root, "記事a1_a1", "記事a1.md"), "# 改変", "utf8");
+      expect(store.classify([item])[0]!.status).toBe("localModified");
+    });
+
+    it("ローカル新規候補を一覧へ合流させる(upload-sync 1.2, 1.3)", () => {
+      const views = store.classify(
+        [makeItem({ id: "a1" })],
+        [
+          {
+            key: "local:new-article",
+            folderName: "new-article",
+            mdFileName: "draft.md",
+            title: "書きかけの記事",
+            tags: ["test"],
+            body: "# 本文",
+            mtime: "2026-08-01T10:00:00.000Z",
+            invalidReasons: [],
+          },
+          {
+            key: "local:broken",
+            folderName: "broken",
+            mdFileName: "b.md",
+            title: null,
+            tags: [],
+            body: "x",
+            mtime: "2026-08-01T10:00:00.000Z",
+            invalidReasons: ["frontmatterにtitleがありません"],
+          },
+        ],
+      );
+      expect(views).toHaveLength(3);
+      const draft = views.find((v) => v.id === "local:new-article");
+      expect(draft).toBeDefined();
+      expect(draft!.status).toBe("localNew");
+      expect(draft!.title).toBe("書きかけの記事");
+      expect(draft!.folderName).toBe("new-article");
+      expect(draft!.invalidReasons).toEqual([]);
+      // 不備のある候補も理由付きで一覧に含まれる(1.3)
+      const broken = views.find((v) => v.id === "local:broken");
+      expect(broken!.status).toBe("localNew");
+      expect(broken!.invalidReasons).toEqual(["frontmatterにtitleがありません"]);
     });
 
     it("indexに存在しQiita一覧にない記事は「Qiita側削除」として一覧に残る(5.6)", async () => {
@@ -127,6 +181,76 @@ describe("StateStore(3.2)", () => {
       expect(agg.notBackedUp).toBe(2);
       expect(agg.upToDate).toBe(1);
       expect(agg.needsBackup).toBe(2); // 未バックアップ + Qiita側更新あり
+    });
+
+    it("集計値: アップロード候補数・競合数・欠落数を追加する(upload-sync 2.7)", async () => {
+      // ローカル改変
+      const modified = makeItem({ id: "m1" });
+      await backUp(modified, "# 元の本文");
+      writeFileSync(join(root, "記事m1_m1", "記事m1.md"), "# 改変", "utf8");
+      // 競合
+      const conflicted = makeItem({ id: "c1" });
+      await backUp(conflicted, "# 元の本文");
+      writeFileSync(join(root, "記事c1_c1", "記事c1.md"), "# 改変", "utf8");
+      // 欠落
+      const missing = makeItem({ id: "x1" });
+      await backUp(missing);
+      unlinkSync(join(root, "記事x1_x1", "記事x1.md"));
+
+      const views = store.classify(
+        [
+          modified,
+          { ...conflicted, updatedAt: "2027-01-01T00:00:00+09:00" },
+          missing,
+          makeItem({ id: "new1" }), // 未バックアップ
+        ],
+        [
+          {
+            key: "local:valid", folderName: "valid", mdFileName: "a.md", title: "有効",
+            tags: ["t"], body: "b", mtime: "", invalidReasons: [],
+          },
+          {
+            key: "local:broken", folderName: "broken", mdFileName: "b.md", title: null,
+            tags: [], body: "b", mtime: "", invalidReasons: ["titleなし"],
+          },
+        ],
+      );
+      const agg = summarize(views);
+      expect(agg.total).toBe(6);
+      expect(agg.localModified).toBe(1);
+      expect(agg.conflict).toBe(1);
+      expect(agg.localMissing).toBe(1);
+      expect(agg.localNew).toBe(2);
+      // アップロード候補 = 有効なローカル新規(1) + ローカル改変(1)。不備・競合・欠落は含めない
+      expect(agg.needsUpload).toBe(2);
+      // 既存の要再バックアップ数の定義は不変(未バックアップ + Qiita側更新あり)
+      expect(agg.needsBackup).toBe(1);
+    });
+  });
+
+  describe("markUploaded — アップロード結果の反映(upload-sync 7.3, 7.4)", () => {
+    it("書き込み成功レスポンスで管理情報を更新し、直後の再分類が「最新」になる", async () => {
+      // ローカル改変状態の記事を作る
+      const item = makeItem({ id: "u1" });
+      await backUp(item, "# 元の本文");
+      const editedContent = "# ユーザが編集した本文";
+      writeFileSync(join(root, "記事u1_u1", "記事u1.md"), editedContent, "utf8");
+      expect(store.classify([item])[0]!.status).toBe("localModified");
+
+      // アップロード成功(レスポンスItemは updated_at が前進している)
+      const responseItem = { ...item, updatedAt: "2026-08-02T15:00:00+09:00" };
+      store.markUploaded(
+        responseItem,
+        {
+          dir: join(root, "記事u1_u1"),
+          viewMd: join(root, "記事u1_u1", "記事u1.md"),
+          originalMd: join(root, "記事u1_u1", "original.md"),
+          metaJson: join(root, "記事u1_u1", "meta.json"),
+        },
+        sha256(editedContent),
+      );
+      // レスポンスの updated_at で再分類しても「最新」(updated_at前進の誤分類なし)
+      expect(store.classify([responseItem])[0]!.status).toBe("upToDate");
     });
   });
 

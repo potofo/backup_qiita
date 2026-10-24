@@ -53,8 +53,10 @@ exit 0
 
 const buildCommitMessage = (summary: RunSummary): string => {
   const status = summary.cancelled ? "中断" : "完了";
+  // Run方向を含める(article-upload-sync 7.5)。省略時はbackup(既存履歴と後方互換)
+  const kind = summary.direction === "upload" ? "アップロード" : "バックアップ";
   return [
-    `バックアップ${status}: ${summary.startedAt} (${summary.mode})`,
+    `${kind}${status}: ${summary.startedAt} (${summary.mode})`,
     "",
     `対象: ${summary.total}件 / 成功: ${summary.succeeded}件 / 失敗: ${summary.failed}件`,
   ].join("\n");

@@ -1,13 +1,16 @@
 // 開発・E2E・性能検証用のスタンドアロン モックQiitaサーバ
 //   - GET /api/v2/authenticated_user / GET /api/v2/authenticated_user/items(ページング対応)
+//   - POST /api/v2/items(新規登録・201)/ PATCH /api/v2/items/:id(更新・200)
 //   - GET /img/{name}.png … 1x1 PNG を返す画像ホスト(認証不要)
 // 環境変数: PORT(既定4510) / ARTICLE_COUNT(既定5) / IMAGES_PER_ARTICLE(既定2) / MOCK_TOKEN(既定 mock-token)
+//           WRITE_FORBIDDEN=1 で書き込みを403(スコープ不足)にする
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.PORT ?? 4510);
 const ARTICLE_COUNT = Number(process.env.ARTICLE_COUNT ?? 5);
 const IMAGES_PER_ARTICLE = Number(process.env.IMAGES_PER_ARTICLE ?? 2);
 const MOCK_TOKEN = process.env.MOCK_TOKEN ?? "mock-token";
+const WRITE_FORBIDDEN = process.env.WRITE_FORBIDDEN === "1";
 
 // 1x1 透過PNG
 const PNG_BYTES = Buffer.from(
@@ -39,8 +42,25 @@ const makeItem = (i) => {
 };
 
 const items = Array.from({ length: ARTICLE_COUNT }, (_, i) => makeItem(i));
+let createdCount = 0;
 
-const server = createServer((req, res) => {
+/** リクエストボディのJSONを読み取る */
+const readBody = (req) =>
+  new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve(text ? JSON.parse(text) : {});
+      } catch (cause) {
+        reject(cause);
+      }
+    });
+    req.on("error", reject);
+  });
+
+const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", origin);
 
   // 画像ホスト(認証不要 — Authorizationが来たら警告)
@@ -65,6 +85,57 @@ const server = createServer((req, res) => {
 
   if (url.pathname === "/api/v2/authenticated_user") {
     sendJson(200, { id: "mockuser", items_count: items.length });
+    return;
+  }
+
+  // ---- 書き込みエンドポイント(article-upload-sync) --------------------------
+  const isCreate = req.method === "POST" && url.pathname === "/api/v2/items";
+  const patchMatch = req.method === "PATCH" ? /^\/api\/v2\/items\/([^/]+)$/.exec(url.pathname) : null;
+  if (isCreate || patchMatch) {
+    if (WRITE_FORBIDDEN) {
+      sendJson(403, { message: "Insufficient token scope", type: "forbidden" });
+      return;
+    }
+    const body = await readBody(req).catch(() => null);
+    if (!body) {
+      sendJson(400, { message: "Bad Request", type: "bad_request" });
+      return;
+    }
+    const now = new Date().toISOString();
+    const tags = Array.isArray(body.tags) ? body.tags.map((t) => ({ name: t.name, versions: [] })) : [];
+    if (isCreate) {
+      createdCount += 1;
+      const id = `created${String(createdCount).padStart(4, "0")}`;
+      const created = {
+        id,
+        title: String(body.title ?? ""),
+        body: String(body.body ?? ""),
+        url: `https://qiita.com/mockuser/items/${id}`,
+        created_at: now,
+        updated_at: now,
+        private: Boolean(body.private),
+        tags,
+        comments_count: 0,
+        likes_count: 0,
+        stocks_count: 0,
+      };
+      items.push(created);
+      console.log(`[mock] 記事を新規登録しました: ${id} (private=${created.private}) ${created.title}`);
+      sendJson(201, created);
+      return;
+    }
+    const existing = items.find((i) => i.id === patchMatch[1]);
+    if (!existing) {
+      sendJson(404, { message: "Not Found", type: "not_found" });
+      return;
+    }
+    existing.title = String(body.title ?? existing.title);
+    existing.body = String(body.body ?? existing.body);
+    if (Array.isArray(body.tags)) existing.tags = tags;
+    if (typeof body.private === "boolean") existing.private = body.private;
+    existing.updated_at = now;
+    console.log(`[mock] 記事を更新しました: ${existing.id} ${existing.title}`);
+    sendJson(200, existing);
     return;
   }
 

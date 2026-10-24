@@ -100,4 +100,61 @@ describe("AuthService(3.1)", () => {
     expect(result.ok).toBe(false);
     expect(existsSync(envPath)).toBe(false);
   });
+
+  describe("writeAccess — 書き込み権限の実績ベース管理(upload-sync 6.1〜6.4)", () => {
+    it("初期状態は未確認(unknown)で接続状態表示に含まれる(6.4)", async () => {
+      const { auth } = await setup("valid-token");
+      expect(auth.writeAccess()).toBe("unknown");
+      expect(auth.status().writeAccess).toBe("unknown");
+    });
+
+    it("403報告後は「不可」となり接続状態表示へ反映される(6.2, 6.4)", async () => {
+      const { auth } = await setup("valid-token");
+      await auth.verify({});
+      auth.reportWriteResult("denied");
+      expect(auth.writeAccess()).toBe("denied");
+      expect(auth.status().writeAccess).toBe("denied");
+    });
+
+    it("書き込み成功報告後は「可」となる", async () => {
+      const { auth } = await setup("valid-token");
+      await auth.verify({});
+      auth.reportWriteResult("granted");
+      expect(auth.status().writeAccess).toBe("granted");
+    });
+
+    it("トークン変更時は未確認へリセットする", async () => {
+      const { auth } = await setup("valid-token");
+      await auth.verify({});
+      auth.reportWriteResult("denied");
+      expect(auth.writeAccess()).toBe("denied");
+
+      // 同一トークンの再検証ではリセットされない
+      await auth.verify({ token: "valid-token" });
+      expect(auth.writeAccess()).toBe("denied");
+
+      // 別トークンへの変更でリセットされる(モックは validToken 以外401のため、
+      // 検証成功する別トークンを許可するモックを立て直す)
+      await mock?.close();
+      mock = await startMockQiita({
+        items: [makeRawItem({ id: "a1" })],
+        userId: "potofo",
+      });
+      const tokenStore = createTokenStore("old-token");
+      const client = new QiitaApiClientImpl(tokenStore, { baseUrl: mock.url });
+      const auth2 = new AuthServiceImpl(client, tokenStore, new EnvFileConfig(envPath));
+      await auth2.verify({});
+      auth2.reportWriteResult("denied");
+      await auth2.verify({ token: "new-token" });
+      expect(auth2.writeAccess()).toBe("unknown");
+    });
+
+    it("読み取り機能(接続確認)はwriteAccessに影響されず従来どおり動作する(6.1)", async () => {
+      const { auth } = await setup("valid-token");
+      auth.reportWriteResult("denied");
+      const result = await auth.verify({});
+      expect(result.ok).toBe(true);
+      expect(auth.status().state).toBe("connected");
+    });
+  });
 });

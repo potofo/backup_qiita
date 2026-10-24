@@ -6,6 +6,7 @@
 import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { writeFileSync, unlinkSync } from "node:fs";
 import type { Express } from "express";
 import { createApp } from "./app.js";
 import { createFileLogger, type Logger } from "../config/logger.js";
@@ -38,12 +39,20 @@ export async function main(): Promise<void> {
   const { QiitaApiClientImpl } = await import("../infra/qiitaApiClient.js");
   const { ImageDownloaderImpl } = await import("../infra/imageDownloader.js");
   const { StorageManagerImpl } = await import("../infra/storageManager.js");
+  const { LocalArticleScannerImpl } = await import("../infra/localArticleScanner.js");
   const { createGitManager } = await import("../infra/gitManager.js");
   const { AuthServiceImpl } = await import("../services/authService.js");
   const { StateStoreImpl } = await import("../services/stateStore.js");
   const { BackupServiceImpl } = await import("../services/backupService.js");
+  const { UploadServiceImpl } = await import("../services/uploadService.js");
+  const { createRunCoordinator } = await import("../services/runCoordinator.js");
   const { createProgressBus } = await import("../services/progressBus.js");
   const { createApiRouter } = await import("./routes.js");
+  const { ImageUploadSettingsStoreImpl } = await import("../infra/imageUploadSettingsStore.js");
+  const { BrowserImageUploaderImpl } = await import("../infra/browserImageUploader.js");
+  const { ImageMapStoreImpl } = await import("../infra/imageMapStore.js");
+  const { ImageUploadPlannerImpl } = await import("../services/imageUploadPlanner.js");
+  const { ImageUploadServiceImpl } = await import("../services/imageUploadService.js");
 
   const backupRoot = resolve(process.cwd(), config.backupDir);
   const qiitaClient = new QiitaApiClientImpl(tokenStore, {
@@ -60,6 +69,9 @@ export async function main(): Promise<void> {
   const stateStore = new StateStoreImpl(storageManager, logger);
   await stateStore.loadIndex();
   const progressBus = createProgressBus();
+  // バックアップ/アップロードのRun排他を共有する(upload-sync 8.4)
+  const runCoordinator = createRunCoordinator();
+  const scanner = new LocalArticleScannerImpl(storageManager, logger);
   const backupService = new BackupServiceImpl({
     qiitaClient,
     imageDownloader,
@@ -67,6 +79,41 @@ export async function main(): Promise<void> {
     gitManager,
     stateStore,
     progressBus,
+    runCoordinator,
+    logger,
+  });
+  // 画像アップロード機能(image-upload-automation)。設定とブラウザプロファイルは backups/ の外に置く(5.2)
+  const imageSettingsStore = new ImageUploadSettingsStoreImpl(resolve(process.cwd(), ".image-upload"), { logger });
+  // ブラウザ操作部品にはアクセストークンを渡さない(11.2)
+  const editorUploader = new BrowserImageUploaderImpl({
+    persistentProfileDir: imageSettingsStore.profileDir(),
+    logger,
+  });
+  const imageAvailability = await editorUploader.availability(); // 1.3: 起動時に一度だけ確かめる
+  if (!imageAvailability.available) {
+    logger.info("画像アップロード機能は利用できません(任意機能)", { reason: imageAvailability.reason });
+  }
+  const imageMapStore = new ImageMapStoreImpl(storageManager);
+  const uploadService = new UploadServiceImpl({
+    qiitaClient,
+    storageManager,
+    gitManager,
+    stateStore,
+    progressBus,
+    runCoordinator,
+    scanner,
+    authService,
+    imageUpload: {
+      planner: new ImageUploadPlannerImpl({ storageManager, imageMapStore }),
+      service: new ImageUploadServiceImpl({
+        uploader: editorUploader,
+        imageMapStore,
+        progressBus,
+        settingsStore: imageSettingsStore,
+        logger,
+      }),
+      isEnabled: () => imageAvailability.available && imageSettingsStore.get().enabled,
+    },
     logger,
   });
 
@@ -74,11 +121,14 @@ export async function main(): Promise<void> {
     authService,
     stateStore,
     backupService,
+    uploadService,
+    scanner,
     storageManager,
     gitManager,
     qiitaClient,
     progressBus,
     logger,
+    imageUpload: { settingsStore: imageSettingsStore, availability: () => imageAvailability },
   });
 
   const app = createApp({
@@ -88,6 +138,27 @@ export async function main(): Promise<void> {
   });
 
   const server = await startServer(app, config.serverPort, logger);
+
+  // npm stop 用のPIDファイル(scripts/stop-server.mjs が参照する)
+  const pidPath = resolve(process.cwd(), ".server.pid");
+  writeFileSync(pidPath, String(process.pid), "utf8");
+  const removePidFile = (): void => {
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      // 既に削除済みなら何もしない
+    }
+  };
+  process.on("exit", removePidFile);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      logger.info("停止シグナルを受信しました。サーバを終了します", { signal });
+      server.close();
+      removePidFile();
+      process.exit(0);
+    });
+  }
+
   const address = server.address();
   const port = address !== null && typeof address === "object" ? address.port : config.serverPort;
   const url = `http://localhost:${port}`;

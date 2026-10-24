@@ -1,9 +1,18 @@
 /**
- * Qiita API v2 クライアント(1.2, 2.1, 3.12)
- * - 呼び出すのは GET /authenticated_user と GET /authenticated_user/items のみ(steering qiita-api.md)
+ * Qiita API v2 クライアント(1.2, 2.1, 3.12 / article-upload-sync 3.2, 3.3, 5.1, 5.3, 8.2)
+ * - 読み取り: GET /authenticated_user と GET /authenticated_user/items
+ * - 書き込み: POST /items(新規・常に限定共有)と PATCH /items/:id(更新・公開範囲を明示送信)。
+ *   DELETEメソッドは実装しない(article-upload-sync 8.2)
  * - Authorization ヘッダはこのクライアントのみが付与する(8.1)。画像取得とは共有しない(8.5)
  */
-import type { ApiError, AuthenticatedUser, QiitaItem, Result } from "../types/index.js";
+import type {
+  ApiError,
+  AuthenticatedUser,
+  CreateItemInput,
+  QiitaItem,
+  Result,
+  UpdateItemInput,
+} from "../types/index.js";
 import { ok, err } from "../types/index.js";
 import type { TokenStore } from "../config/tokenStore.js";
 import type { Logger } from "../config/logger.js";
@@ -11,6 +20,10 @@ import type { Logger } from "../config/logger.js";
 export interface QiitaApiClient {
   verifyToken(token: string): Promise<Result<AuthenticatedUser, ApiError>>;
   fetchAllItems(onPage?: (fetched: number, total: number) => void): Promise<Result<QiitaItem[], ApiError>>;
+  /** 記事の新規登録(article-upload-sync 3.2)。常に限定共有(5.1) */
+  createItem(input: CreateItemInput): Promise<Result<QiitaItem, ApiError>>;
+  /** 記事の更新(article-upload-sync 3.3)。公開範囲は常に明示送信(5.3) */
+  updateItem(itemId: string, input: UpdateItemInput): Promise<Result<QiitaItem, ApiError>>;
 }
 
 const PER_PAGE = 100;
@@ -47,9 +60,9 @@ const parseResetAt = (res: Response): Date => {
   return new Date(Date.now() + 60_000);
 };
 
-const toApiError = (res: Response): ApiError => {
+const toApiError = (res: Response, message?: string): ApiError => {
   if (res.status === 401) return { kind: "unauthorized" };
-  if (res.status === 403) return { kind: "forbidden" };
+  if (res.status === 403) return { kind: "forbidden", ...(message ? { message } : {}) };
   if (res.status === 429) return { kind: "rateLimited", resetAt: parseResetAt(res) };
   return { kind: "server", status: res.status };
 };
@@ -73,6 +86,27 @@ export class QiitaApiClientImpl implements QiitaApiClient {
     if (!result.ok) return result;
     const body = (await result.value.json()) as Record<string, unknown>;
     return ok({ id: String(body["id"]), itemsCount: Number(body["items_count"] ?? 0) });
+  }
+
+  async createItem(input: CreateItemInput): Promise<Result<QiitaItem, ApiError>> {
+    const token = this.tokenStore.get();
+    if (!token) return err({ kind: "unauthorized" });
+    // 送信ペイロード(Qiita APIはこの範囲では全キーがそのままsnake_case)
+    const result = await this.request("/items", token, { method: "POST", body: input });
+    if (!result.ok) return result;
+    const raw = (await result.value.json()) as Record<string, unknown>;
+    this.logger?.info("記事を新規登録しました", { itemId: String(raw["id"]), status: 201 });
+    return ok(toQiitaItem(raw));
+  }
+
+  async updateItem(itemId: string, input: UpdateItemInput): Promise<Result<QiitaItem, ApiError>> {
+    const token = this.tokenStore.get();
+    if (!token) return err({ kind: "unauthorized" });
+    const result = await this.request(`/items/${itemId}`, token, { method: "PATCH", body: input });
+    if (!result.ok) return result;
+    const raw = (await result.value.json()) as Record<string, unknown>;
+    this.logger?.info("記事を更新しました", { itemId, status: 200 });
+    return ok(toQiitaItem(raw));
   }
 
   async fetchAllItems(
@@ -102,20 +136,36 @@ export class QiitaApiClientImpl implements QiitaApiClient {
     return ok(items);
   }
 
-  /** 共通リクエスト処理: HTTPエラーをApiErrorへ変換する */
-  private async request(path: string, token: string): Promise<Result<Response, ApiError>> {
+  /** 共通リクエスト処理: HTTPエラーをApiErrorへ変換する(GET/POST/PATCH・JSONボディ対応) */
+  private async request(
+    path: string,
+    token: string,
+    options: { method?: string; body?: unknown } = {},
+  ): Promise<Result<Response, ApiError>> {
     let res: Response;
     try {
-      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      const init: RequestInit = { method: options.method ?? "GET", headers };
+      if (options.body !== undefined) {
+        headers["content-type"] = "application/json";
+        init.body = JSON.stringify(options.body);
+      }
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, init);
     } catch (cause) {
       this.logger?.warn("Qiita APIへの接続に失敗しました", { path, cause: String(cause) });
       return err({ kind: "network", cause: String(cause) });
     }
     if (!res.ok) {
+      // エラーレスポンスの message を取り出す(403の原因案内に使う — トークンは含まれない)
+      let apiMessage: string | undefined;
+      try {
+        const raw = (await res.json()) as Record<string, unknown>;
+        if (typeof raw["message"] === "string") apiMessage = raw["message"];
+      } catch {
+        // JSONでないレスポンスは無視
+      }
       this.logger?.warn("Qiita APIがエラーを返しました", { path, status: res.status });
-      return err(toApiError(res));
+      return err(toApiError(res, apiMessage));
     }
     return ok(res);
   }

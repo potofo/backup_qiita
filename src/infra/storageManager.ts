@@ -18,13 +18,18 @@ import { randomBytes } from "node:crypto";
 import type {
   ArticleMeta,
   ArticlePaths,
+  DraftImageUploads,
   ImageResult,
+  LocalDraft,
   QiitaItem,
   Result,
   StorageError,
 } from "../types/index.js";
 import { ok, err } from "../types/index.js";
 import type { Logger } from "../config/logger.js";
+
+/** 新規記事フォルダの画像対応表(記事ID確定前 — image-upload-automation 7.5) */
+export const DRAFT_IMAGE_UPLOADS_FILE = ".image-uploads.json";
 
 /** サニタイズ済みタイトルの最大長(4.2) */
 const MAX_TITLE_LENGTH = 50;
@@ -78,6 +83,13 @@ export interface StorageManager {
     rewrittenMd: string,
     images: ImageResult[],
   ): Promise<Result<ArticlePaths, StorageError>>;
+  /**
+   * ローカル新規フォルダを正規レイアウトへ変換する(upload-sync 7.3):
+   * {folderName} → {サニタイズ済タイトル}_{記事ID} へリネームし、
+   * 閲覧用Markdown・original.md・meta.json を生成。元の.mdはフォルダ内に残さない
+   * (内容は閲覧用mdへ引き継ぎ。ユーザ配置のその他ファイルは保持)
+   */
+  normalizeDraft(draft: LocalDraft, item: QiitaItem): Promise<Result<ArticlePaths, StorageError>>;
   writeJsonAtomic<T>(relPath: string, data: T): Promise<Result<void, StorageError>>;
   readJson<T>(relPath: string): Result<T, StorageError>;
   openFolder(articleId: string): Result<void, StorageError>;
@@ -177,6 +189,10 @@ export class StorageManagerImpl implements StorageManager {
         metaJson: join(dir, "meta.json"),
       };
 
+      // アップロードした画像の対応表は保存のたびに引き継ぐ(image-upload-automation 7.4)
+      const previous = this.readJson<ArticleMeta>(join(folderName, "meta.json"));
+      const uploadedImages = previous.ok ? previous.value.uploadedImages : undefined;
+
       await writeFile(paths.viewMd, rewrittenMd, "utf8");
       await writeFile(paths.originalMd, article.body, "utf8");
 
@@ -194,6 +210,7 @@ export class StorageManagerImpl implements StorageManager {
         stocksCount: article.stocksCount,
         backedUpAt: new Date().toISOString(),
         images,
+        ...(uploadedImages ? { uploadedImages } : {}),
       };
       const metaResult = await this.writeJsonAtomic(join(folderName, "meta.json"), meta);
       if (!metaResult.ok) return metaResult;
@@ -202,6 +219,104 @@ export class StorageManagerImpl implements StorageManager {
     } catch (cause) {
       this.logger?.error("記事の保存に失敗しました", { articleId: article.id, cause: String(cause) });
       return err({ kind: "io", message: `記事の保存に失敗しました: ${String(cause)}` });
+    }
+  }
+
+  async normalizeDraft(
+    draft: LocalDraft,
+    item: QiitaItem,
+  ): Promise<Result<ArticlePaths, StorageError>> {
+    try {
+      const sourceDir = join(this.root, draft.folderName);
+      if (!existsSync(sourceDir)) {
+        return err({
+          kind: "notFound",
+          message: `新規記事フォルダが見つかりません: ${draft.folderName}`,
+        });
+      }
+
+      const folderName = articleFolderName(item.title, item.id);
+      const dir = join(this.root, folderName);
+      if (sourceDir !== dir) {
+        if (existsSync(dir)) {
+          return err({
+            kind: "io",
+            message: `リネーム先フォルダが既に存在します: ${folderName}`,
+          });
+        }
+        renameSync(sourceDir, dir);
+      }
+
+      const sanitized = sanitizeTitle(item.title);
+      const paths: ArticlePaths = {
+        dir,
+        viewMd: join(dir, `${sanitized}.md`),
+        originalMd: join(dir, "original.md"),
+        metaJson: join(dir, "meta.json"),
+      };
+
+      // 元の.mdはフォルダ内に残さない(内容は閲覧用mdへ引き継ぐ)
+      if (draft.mdFileName && draft.mdFileName !== `${sanitized}.md`) {
+        try {
+          unlinkSync(join(dir, draft.mdFileName));
+        } catch {
+          // 既に存在しない場合は何もしない
+        }
+      }
+
+      // 記事ID確定前の画像対応表を meta へ移す(image-upload-automation 7.5)
+      const sidecar = this.readJson<DraftImageUploads>(join(folderName, DRAFT_IMAGE_UPLOADS_FILE));
+      const uploadedImages = sidecar.ok ? sidecar.value.entries : [];
+
+      mkdirSync(join(dir, "images"), { recursive: true });
+      await writeFile(paths.viewMd, draft.body, "utf8");
+      await writeFile(paths.originalMd, item.body, "utf8");
+
+      const meta: ArticleMeta = {
+        schemaVersion: 1,
+        id: item.id,
+        title: item.title,
+        url: item.url,
+        private: item.private,
+        tags: item.tags.map((t) => t.name),
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        commentsCount: item.commentsCount,
+        likesCount: item.likesCount,
+        stocksCount: item.stocksCount,
+        backedUpAt: new Date().toISOString(),
+        images: [],
+        ...(uploadedImages.length > 0 ? { uploadedImages } : {}),
+      };
+      const metaResult = await this.writeJsonAtomic(join(folderName, "meta.json"), meta);
+      if (!metaResult.ok) return metaResult;
+      if (sidecar.ok) {
+        // meta への書き込みが成功した場合だけ補助ファイルを消す(rmSync は使わない — steering tech.md)
+        try {
+          unlinkSync(join(dir, DRAFT_IMAGE_UPLOADS_FILE));
+        } catch (cause) {
+          this.logger?.warn("画像対応表の補助ファイルを削除できませんでした", {
+            articleId: item.id,
+            cause: String(cause),
+          });
+        }
+      }
+
+      this.logger?.info("新規記事フォルダを正規化しました", {
+        articleId: item.id,
+        from: draft.folderName,
+        to: folderName,
+      });
+      return ok(paths);
+    } catch (cause) {
+      this.logger?.error("新規記事フォルダの正規化に失敗しました", {
+        articleId: item.id,
+        cause: String(cause),
+      });
+      return err({
+        kind: "io",
+        message: `新規記事フォルダの正規化に失敗しました: ${String(cause)}`,
+      });
     }
   }
 

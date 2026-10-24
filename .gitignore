@@ -9,10 +9,16 @@ backups/index.json
 # 実行ログ
 logs/
 
+# 起動中サーバのPIDファイル(npm stop用)
+.server.pid
+
 # Node.js
 node_modules/
 dist/
 public/
+
+# 画像アップロード機能の設定・ブラウザセッション(image-upload-automation 5.2)
+.image-upload/
 
 # Playwright MCP(ブラウザ検証時の作業ファイル)
 .playwright-mcp/

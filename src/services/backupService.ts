@@ -24,6 +24,8 @@ import type { StorageManager } from "../infra/storageManager.js";
 import type { GitManager } from "../infra/gitManager.js";
 import type { StateStore } from "./stateStore.js";
 import type { ProgressBus } from "./progressBus.js";
+import type { RunCoordinator, RunLease } from "./runCoordinator.js";
+import { createRunCoordinator } from "./runCoordinator.js";
 import type { Logger } from "../config/logger.js";
 
 export type RunHandle = {
@@ -50,6 +52,8 @@ type Deps = {
   gitManager: GitManager;
   stateStore: StateStore;
   progressBus: ProgressBus;
+  /** Run排他の共有機構(article-upload-sync 8.4)。省略時は専用インスタンス(単体テスト用) */
+  runCoordinator?: RunCoordinator;
   logger?: Logger;
 };
 
@@ -74,10 +78,25 @@ export const rewriteImageRefs = (markdown: string, images: ImageResult[]): strin
   return out;
 };
 
+/**
+ * rewriteImageRefs の逆変換(article-upload-sync 8.3): 閲覧用Markdownの相対パス画像参照を
+ * meta.json の対応表(images)で元URLへ復元する。対応表にない参照はそのまま温存する
+ */
+export const restoreImageRefs = (markdown: string, images: ImageResult[]): string => {
+  let out = markdown;
+  for (const image of images) {
+    if (image.ok) {
+      out = out.split(`images/${image.fileName}`).join(image.url);
+    }
+  }
+  return out;
+};
+
 export class BackupServiceImpl implements BackupService {
-  private running = false;
+  private lease: RunLease | null = null;
   private cancelled = false;
   private articleCache: ArticleView[] | null = null;
+  private readonly coordinator: RunCoordinator;
   private readonly retryLimit: number;
   private readonly listRetryDelayMs: number;
 
@@ -85,6 +104,7 @@ export class BackupServiceImpl implements BackupService {
     private readonly deps: Deps,
     options: Options = {},
   ) {
+    this.coordinator = deps.runCoordinator ?? createRunCoordinator();
     this.retryLimit = options.retryLimit ?? 2;
     this.listRetryDelayMs = options.listRetryDelayMs ?? 1000;
   }
@@ -98,45 +118,55 @@ export class BackupServiceImpl implements BackupService {
     ids?: string[];
     confirmOverwrite?: boolean;
   }): Result<RunHandle, StartError> {
-    if (this.running) return err({ kind: "conflict" }); // 同時実行は1件(排他)
+    if (this.coordinator.active() !== null) return err({ kind: "conflict" }); // 同時実行は1件(8.4)
     if (req.mode === "selected" && (!req.ids || req.ids.length === 0)) {
       return err({ kind: "invalidRequest", message: "選択バックアップには記事IDの指定が必要です" });
     }
 
-    // 「ローカル変更あり」記事を含むRunは上書き確認済みフラグを要求する(5.5)
+    // 「ローカル変更あり」「競合」記事を含むRunは上書き確認済みフラグを要求する(5.5 / upload-sync 2.6)。
+    // 「ローカル欠落」は失われる変更が存在しないため確認不要で復元できる(upload-sync 2.3)
     if (!req.confirmOverwrite && this.articleCache) {
       const targets = this.selectTargets(this.articleCache, req.mode, req.ids);
-      const modified = targets.filter((t) => t.status === "localModified").map((t) => t.id);
+      const modified = targets
+        .filter((t) => t.status === "localModified" || t.status === "conflict")
+        .map((t) => t.id);
       if (modified.length > 0) {
         return err({ kind: "needsOverwriteConfirm", articleIds: modified });
       }
     }
 
-    this.running = true;
-    this.cancelled = false;
     const runId = `run-${randomUUID()}`;
+    const acquired = this.coordinator.acquire("backup", runId);
+    if (!acquired.ok) return err({ kind: "conflict" });
+    this.lease = acquired.value;
+    this.cancelled = false;
     const done = this.executeRun(runId, req).finally(() => {
-      this.running = false;
+      // Run終了(中断・エラー含む)で必ずリースを解放する(release漏れ防止)
+      this.lease?.release();
+      this.lease = null;
     });
     return ok({ runId, done });
   }
 
   cancel(): void {
-    if (this.running) {
+    if (this.lease) {
       this.cancelled = true;
       this.deps.logger?.info("バックアップの中断が指示されました");
     }
   }
 
   private selectTargets(views: ArticleView[], mode: RunMode, ids?: string[]): ArticleView[] {
-    // Qiita側削除の記事は取得できないため常に対象外(5.6: ローカルは保持)
-    const backupable = views.filter((v) => v.status !== "deletedOnQiita");
+    // Qiita側削除の記事は取得できないため常に対象外(5.6: ローカルは保持)。
+    // ローカル新規行はQiita側に実体がなくダウンロード不能のため対象外(upload-sync)
+    const backupable = views.filter(
+      (v) => v.status !== "deletedOnQiita" && v.status !== "localNew",
+    );
     if (mode === "all") return backupable;
     if (mode === "selected") {
       const idSet = new Set(ids ?? []);
       return backupable.filter((v) => idSet.has(v.id));
     }
-    // diff(既定): 未バックアップ + Qiita側更新あり(3.3)
+    // diff(既定): 未バックアップ + Qiita側更新あり(3.3)。競合は除外される(upload-sync 2.5)
     return backupable.filter((v) => v.status === "notBackedUp" || v.status === "qiitaUpdated");
   }
 
@@ -146,7 +176,7 @@ export class BackupServiceImpl implements BackupService {
   ): Promise<RunSummary> {
     const { progressBus, stateStore, gitManager, logger } = this.deps;
     const startedAt = new Date().toISOString();
-    progressBus.emit({ type: "run-start", runId, mode: req.mode });
+    progressBus.emit({ type: "run-start", runId, mode: req.mode, direction: "backup" });
 
     let succeeded = 0;
     let failed = 0;
@@ -163,8 +193,11 @@ export class BackupServiceImpl implements BackupService {
       this.articleCache = views;
       targets = this.selectTargets(views, req.mode, req.ids);
 
-      // サーバ側の安全網: 未確認の「ローカル変更あり」上書きを拒否する(5.5)
-      if (!req.confirmOverwrite && targets.some((t) => t.status === "localModified")) {
+      // サーバ側の安全網: 未確認の「ローカル変更あり」「競合」上書きを拒否する(5.5 / upload-sync 2.6)
+      if (
+        !req.confirmOverwrite &&
+        targets.some((t) => t.status === "localModified" || t.status === "conflict")
+      ) {
         progressBus.emit({
           type: "run-error",
           code: "OVERWRITE_CONFIRM_REQUIRED",
@@ -233,6 +266,7 @@ export class BackupServiceImpl implements BackupService {
       imageFailures,
       cancelled: this.cancelled,
       commit: null,
+      direction: "backup",
     };
     stateStore.appendHistory(summary);
     // 処理実績のないRun(対象0件)は index.json 保存とコミットを行わない(6.4: 変更ゼロならコミットしない)

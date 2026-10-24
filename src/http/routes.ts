@@ -1,15 +1,27 @@
 /**
- * HTTP API ルーティング(タスク4)
+ * HTTP API ルーティング(タスク4 / article-upload-sync 3.1, 4.3, 6.4, 7.1, 8.1)
  * - 設計書のAPIコントラクト表(design.md)どおりのREST+SSEを提供する
+ * - Qiitaへの書き込みは POST /api/upload への明示的リクエスト経由に限定する(8.1)
  * - エラーは統一形式 { error: { code, message } }(日本語メッセージ)へ変換する
+ * - 画像アップロード機能の設定API(image-upload-automation 1.4, 5.3)。Run実行中の変更は拒否する
  */
 import { Router, type Request, type Response } from "express";
-import type { ArticleView, RunMode } from "../types/index.js";
+import type {
+  ArticleView,
+  ImageUploadSettingsPatch,
+  ImageUploadSettingsView,
+  RunMode,
+  UploadStartRequest,
+} from "../types/index.js";
+import type { ImageUploadSettingsStore } from "../infra/imageUploadSettingsStore.js";
+import type { UploaderAvailability } from "../infra/browserImageUploader.js";
 import type { AuthService } from "../services/authService.js";
 import type { StateStore } from "../services/stateStore.js";
 import { summarize } from "../services/stateStore.js";
 import type { BackupService } from "../services/backupService.js";
+import type { UploadService } from "../services/uploadService.js";
 import type { StorageManager } from "../infra/storageManager.js";
+import type { LocalArticleScanner } from "../infra/localArticleScanner.js";
 import type { GitManager } from "../infra/gitManager.js";
 import type { QiitaApiClient } from "../infra/qiitaApiClient.js";
 import type { ProgressBus } from "../services/progressBus.js";
@@ -19,11 +31,19 @@ export type ApiDeps = {
   authService: AuthService;
   stateStore: StateStore;
   backupService: BackupService;
+  uploadService: UploadService;
+  scanner: LocalArticleScanner;
   storageManager: StorageManager;
   gitManager: GitManager;
   qiitaClient: QiitaApiClient;
   progressBus: ProgressBus;
   logger?: Logger;
+  /** 画像アップロード機能(未指定なら設定APIは「利用不可」を返す) */
+  imageUpload?: {
+    settingsStore: ImageUploadSettingsStore;
+    /** 起動時に確かめた実行環境の利用可否(1.3) */
+    availability(): UploaderAvailability;
+  };
 };
 
 const sendError = (res: Response, status: number, code: string, message: string): void => {
@@ -90,8 +110,14 @@ export function createApiRouter(deps: ApiDeps): Router {
             return;
         }
       }
-      cachedViews = deps.stateStore.classify(result.value);
+      // ローカル新規記事の走査結果を合流させる(upload-sync 1.1, 1.2)
+      const scanResult = deps.scanner.scan(deps.stateStore.knownIds());
+      if (!scanResult.ok) {
+        deps.logger?.warn("ローカル新規記事の走査に失敗しました", { message: scanResult.error.message });
+      }
+      cachedViews = deps.stateStore.classify(result.value, scanResult.ok ? scanResult.value : []);
       deps.backupService.updateArticleCache(cachedViews);
+      deps.uploadService.updateArticleCache(cachedViews);
     }
     res.json({
       articles: cachedViews.map(toListItem),
@@ -148,6 +174,67 @@ export function createApiRouter(deps: ApiDeps): Router {
     res.json({ runId: result.value.runId });
   });
 
+  // ---- アップロード実行(upload-sync 3.1, 4.3, 8.1) -------------------------
+  // 書き込みはこの明示的操作経由に限定する(自動同期の導線を設けない)
+
+  router.post("/upload", (req, res) => {
+    const { mode, ids, confirmed, uploadImages } = (req.body ?? {}) as UploadStartRequest;
+    if (mode !== "changes" && mode !== "selected") {
+      sendError(res, 400, "INVALID_MODE", "モードは changes / selected のいずれかを指定してください。");
+      return;
+    }
+    const result = deps.uploadService.start({ mode, ids, confirmed, uploadImages: uploadImages === true });
+    if (!result.ok) {
+      switch (result.error.kind) {
+        case "conflict": {
+          const kindLabel = result.error.active === "upload" ? "アップロード" : "バックアップ";
+          sendError(res, 409, "RUN_IN_PROGRESS", `${kindLabel}が実行中です。完了または中断してから再実行してください。`);
+          return;
+        }
+        case "writeAccessDenied":
+          sendError(
+            res,
+            403,
+            "WRITE_ACCESS_DENIED",
+            "トークンに書き込み権限(write_qiita)がありません。read_qiita / write_qiita スコープ付きのトークンを発行してください。",
+          );
+          return;
+        case "needsUploadConfirm":
+          // 428: 実行前確認が必要(確認情報を返す — 4.3)
+          res.status(428).json({
+            error: {
+              code: "UPLOAD_CONFIRM_REQUIRED",
+              message: "アップロード内容の確認が必要です。対象を確認のうえ confirmed: true で再送してください。",
+            },
+            info: result.error.info,
+          });
+          return;
+        case "invalidTargets":
+          res.status(400).json({
+            error: {
+              code: "INVALID_TARGETS",
+              message: "アップロードできない記事が含まれています。",
+            },
+            details: result.error.details,
+          });
+          return;
+        case "invalidRequest":
+          sendError(res, 400, "INVALID_REQUEST", result.error.message);
+          return;
+      }
+    }
+    // Run完了時に一覧キャッシュを無効化する(次回GETで再分類)
+    result.value.done.then(() => {
+      cachedViews = null;
+    });
+    res.status(202).json({ runId: result.value.runId });
+  });
+
+  router.post("/upload/cancel", (_req, res) => {
+    deps.uploadService.cancel();
+    res.status(204).end();
+  });
+
   router.post("/backup/cancel", (_req, res) => {
     if (!deps.progressBus.snapshot().running) {
       sendError(res, 404, "NO_ACTIVE_RUN", "実行中のバックアップはありません。");
@@ -181,6 +268,80 @@ export function createApiRouter(deps: ApiDeps): Router {
       clearInterval(heartbeat);
       unsubscribe();
     });
+  });
+
+  // ---- 画像アップロードの設定(image-upload-automation 1.4, 5.3) ------------------
+
+  const settingsView = (): ImageUploadSettingsView | null => {
+    const feature = deps.imageUpload;
+    if (!feature) return null;
+    const availability = feature.availability();
+    return {
+      ...feature.settingsStore.get(),
+      available: availability.available,
+      unavailableReason: availability.available ? null : availability.reason,
+      hasSavedSession: feature.settingsStore.hasSavedSession(),
+    };
+  };
+
+  router.get("/image-upload/settings", (_req, res) => {
+    const view = settingsView();
+    if (!view) {
+      sendError(res, 503, "IMAGE_UPLOAD_UNAVAILABLE", "画像アップロード機能は組み込まれていません。");
+      return;
+    }
+    res.json(view);
+  });
+
+  router.put("/image-upload/settings", (req, res) => {
+    const feature = deps.imageUpload;
+    if (!feature) {
+      sendError(res, 503, "IMAGE_UPLOAD_UNAVAILABLE", "画像アップロード機能は組み込まれていません。");
+      return;
+    }
+    if (deps.progressBus.snapshot().running) {
+      sendError(res, 409, "RUN_IN_PROGRESS", "実行中は画像アップロードの設定を変更できません。完了または中断してから操作してください。");
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch: ImageUploadSettingsPatch = {};
+    if (typeof body["enabled"] === "boolean") patch.enabled = body["enabled"];
+    if (body["consent"] === true) patch.consent = true;
+    if (typeof body["persistSession"] === "boolean") patch.persistSession = body["persistSession"];
+
+    const availability = feature.availability();
+    if (patch.enabled === true && !availability.available) {
+      sendError(res, 503, "IMAGE_UPLOAD_UNAVAILABLE", `画像アップロード機能を利用できません: ${availability.reason}`);
+      return;
+    }
+    const updated = feature.settingsStore.update(patch);
+    if (!updated.ok) {
+      if (updated.error.kind === "consentRequired") {
+        sendError(res, 400, "CONSENT_REQUIRED", "画像アップロード機能を有効にするには、注意事項への同意が必要です。");
+      } else {
+        sendError(res, 500, "SETTINGS_WRITE_FAILED", "画像アップロードの設定を保存できませんでした。");
+      }
+      return;
+    }
+    res.json(settingsView());
+  });
+
+  router.delete("/image-upload/session", (_req, res) => {
+    const feature = deps.imageUpload;
+    if (!feature) {
+      sendError(res, 503, "IMAGE_UPLOAD_UNAVAILABLE", "画像アップロード機能は組み込まれていません。");
+      return;
+    }
+    if (deps.progressBus.snapshot().running) {
+      sendError(res, 409, "RUN_IN_PROGRESS", "実行中は保存済みのログイン状態を削除できません。完了または中断してから操作してください。");
+      return;
+    }
+    const cleared = feature.settingsStore.clearSession();
+    if (!cleared.ok) {
+      sendError(res, 500, "SESSION_CLEAR_FAILED", "保存済みのログイン状態を削除できませんでした。ブラウザを閉じてから再度お試しください。");
+      return;
+    }
+    res.status(204).end();
   });
 
   // ---- 実行履歴(5.8) -----------------------------------------------------

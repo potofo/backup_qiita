@@ -35,7 +35,7 @@
           <div class="warn-box">
             <p><strong>発行手順(Qiitaにサインイン後):</strong></p>
             <p>[ユーザアイコン] ⇒ [設定] ⇒ [アプリケーション] ⇒ [個人用アクセストークン] ⇒ 「新しくトークンを発行する」</p>
-            <p class="muted">(スコープは read_qiita のみ / トークンの表示は発行時の1回のみ)</p>
+            <p class="muted">(バックアップのみ: read_qiita / アップロードも使う場合: read_qiita + write_qiita。トークンの表示は発行時の1回のみ)</p>
             <p><a href="https://qiita.com/settings/tokens/new" target="_blank" rel="noopener noreferrer">発行ページを開く(qiita.com/settings/tokens/new)</a></p>
           </div>
           <div class="token-form">
@@ -62,6 +62,8 @@
         <button id="btn-backup-diff" class="primary">差分バックアップ実行</button>
         <button id="btn-backup-all">全件バックアップ</button>
         <button id="btn-backup-selected">選択をバックアップ</button>
+        <button id="btn-upload-changes" class="upload">変更点をアップロード</button>
+        <button id="btn-upload-selected" class="upload">選択をアップロード</button>
         <span class="spacer"></span>
         <label>状態:
           <select id="filter-status">
@@ -70,6 +72,9 @@
             <option value="upToDate">最新</option>
             <option value="qiitaUpdated">Qiita更新あり</option>
             <option value="localModified">ローカル変更あり</option>
+            <option value="localNew">ローカル新規</option>
+            <option value="conflict">競合</option>
+            <option value="localMissing">ローカル欠落</option>
             <option value="deletedOnQiita">Qiita側削除</option>
           </select>
         </label>
@@ -82,6 +87,50 @@
           </select>
         </label>
       </div>
+      <details class="card help-card">
+        <summary>新規記事の作成規約(ローカル→Qiitaアップロード)</summary>
+        <div class="help-body">
+          <p>バックアップフォルダ(<code>backups/</code>)直下に<strong>任意名のフォルダ</strong>を作り、その直下に <strong>Markdownファイル(.md)を1つ</strong>置いてください。ファイル先頭に次のfrontmatterが必要です:</p>
+          <pre>---
+title: 記事のタイトル
+tags: [tag1, tag2]
+---
+ここから本文を書きます。</pre>
+          <ul>
+            <li><code>title</code>(必須): 記事のタイトル</li>
+            <li><code>tags</code>(必須・1件以上): <code>[a, b]</code> / <code>a b c</code>(スペース区切り)/ <code>- タグ名</code> の行区切り のいずれか</li>
+          </ul>
+          <p class="muted">アップロードされた新規記事は<strong>限定共有(非公開)</strong>として登録されます。公開はQiita上で行ってください。登録成功後、フォルダは既存記事と同じ構成(タイトル_記事ID)へ自動変換されます。</p>
+        </div>
+      </details>
+      <!-- 画像の自動アップロード設定(image-upload-automation 1.3, 1.4, 5.1〜5.3) -->
+      <details class="card help-card" id="image-upload-panel">
+        <summary>画像の自動アップロード(任意機能): <span id="img-status-label">確認中…</span></summary>
+        <div class="help-body">
+          <p>記事が参照するローカル画像を、アップロードの前にQiitaのエディタ画面経由で自動アップロードし、送信する本文の画像参照をQiitaの画像URLに置き換えます。ログインは開いたブラウザで<strong>ご自身で</strong>行います(パスワードはツールに渡りません)。</p>
+          <div id="img-unavailable" class="warn-box" hidden>
+            <p><strong>この環境では利用できません:</strong> <span id="img-unavailable-reason"></span></p>
+            <p>導入手順: <code>npm install</code> でブラウザ操作ライブラリ(playwright-core・任意依存)を導入し、Microsoft Edge または Google Chrome がインストールされていることを確認して、サーバを再起動してください。</p>
+          </div>
+          <div id="img-controls">
+            <label class="checkbox-label">
+              <input type="checkbox" id="img-enabled" />
+              画像の自動アップロードを有効にする
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="img-persist" />
+              ログイン状態を保存する(次回からログインを省略。保存先: <code>.image-upload/browser-profile/</code>)
+            </label>
+            <p id="img-session-line" class="muted" hidden>
+              ログイン状態を保存しています。
+              <button id="btn-img-clear-session" class="link-btn">保存済みのログイン状態を削除</button>
+            </p>
+            <p id="img-draft-line" class="muted" hidden>
+              作業用の下書き: <a id="img-draft-link" href="#" target="_blank" rel="noopener noreferrer"></a>(不要になったらQiita上で削除してください)
+            </p>
+          </div>
+        </div>
+      </details>
       <div id="articles-empty" class="card" hidden>
         <p>記事一覧が未取得です。「一覧再取得」を押してください。</p>
       </div>
@@ -111,6 +160,8 @@
         <p id="progress-count">0 / 0 件</p>
         <p id="progress-current"></p>
         <div id="rate-limit-notice" class="warn-box" hidden></div>
+        <div id="image-login-notice" class="warn-box" hidden></div>
+        <p id="image-progress-line" hidden></p>
         <div id="run-error-notice" class="error-box" hidden></div>
         <button id="btn-cancel" class="danger">中断</button>
         <h3>記事単位の結果ログ</h3>
@@ -126,6 +177,23 @@
           <div class="tile"><div class="label">失敗</div><div class="num ng-num" id="sum-failed">0 件</div></div>
         </div>
         <div id="sum-commit" class="muted"></div>
+        <div id="upload-failures-block" hidden>
+          <h3 id="upload-failures-heading">アップロード失敗一覧</h3>
+          <table>
+            <thead><tr><th>記事</th><th>理由</th></tr></thead>
+            <tbody id="upload-failures-body"></tbody>
+          </table>
+        </div>
+        <div id="image-upload-block" hidden>
+          <h3>画像のアップロード</h3>
+          <p id="image-upload-counts"></p>
+          <div id="image-upload-abort" class="error-box" hidden></div>
+          <table id="image-upload-failures" hidden>
+            <thead><tr><th>記事</th><th>画像</th><th>理由</th></tr></thead>
+            <tbody id="image-upload-failures-body"></tbody>
+          </table>
+          <div id="image-upload-draft" class="warn-box" hidden></div>
+        </div>
         <div id="image-failures-block" hidden>
           <h3 id="image-failures-heading">画像取得失敗一覧</h3>
           <table>
@@ -139,6 +207,52 @@
         <button id="btn-back-to-list" class="primary">記事一覧へ戻る</button>
       </div>
     </section>
+    <!-- ================= アップロード実行前確認ダイアログ(upload-sync 4.3, 5.2) ================= -->
+    <div id="upload-confirm-overlay" class="modal-overlay" hidden>
+      <div class="modal card">
+        <h2>アップロード内容の確認</h2>
+        <p class="notice-private">新規記事は<strong>限定共有(非公開)</strong>として登録されます。アップロードによって記事が公開されることはありません。公開はQiita上で行ってください。</p>
+        <h3 id="upload-confirm-count"></h3>
+        <div class="log-list" id="upload-confirm-targets"></div>
+        <div id="upload-confirm-public" class="warn-box" hidden></div>
+        <div id="upload-confirm-conflicts" class="error-box" hidden></div>
+        <div id="upload-confirm-image-plan" class="image-plan-box" hidden>
+          <label class="checkbox-label">
+            <input type="checkbox" id="upload-images-check" />
+            <strong>ローカル画像をQiitaへアップロードしてから記事をアップロードする</strong>
+          </label>
+          <p id="upload-image-plan-summary"></p>
+          <div class="log-list" id="upload-image-plan-list"></div>
+          <ul class="muted image-plan-notes">
+            <li>アップロードした画像は、URLを知っている人なら誰でも閲覧できます(限定共有の記事でも同じです)。</li>
+            <li>Qiitaの画像アップロード容量を消費します。</li>
+            <li>画像の投入のため、Qiita上に作業用の下書きが1件残ります(削除はQiita上でご自身で行ってください)。</li>
+            <li>実行するとブラウザが開きます。Qiitaにログインしていない場合は、開いたブラウザでログインしてください。</li>
+          </ul>
+        </div>
+        <div id="upload-confirm-images" class="warn-box" hidden></div>
+        <div class="modal-actions">
+          <button id="btn-upload-approve" class="primary">アップロードを実行</button>
+          <button id="btn-upload-cancel-dialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
+    <!-- ================= 画像の自動アップロードの同意ダイアログ(image-upload-automation 1.4) ================= -->
+    <div id="image-consent-overlay" class="modal-overlay" hidden>
+      <div class="modal card">
+        <h2>画像の自動アップロードを有効にする前に</h2>
+        <ul>
+          <li>Qiita API には画像をアップロードする手段がないため、この機能は<strong>Qiitaのエディタ画面をブラウザで自動操作する非公式な方法</strong>で画像をアップロードします。</li>
+          <li>Qiitaの画面が変更されると、<strong>予告なく動作しなくなる</strong>ことがあります。その場合は処理を止め、手動での画像アップロード手順を案内します。</li>
+          <li>Qiita利用規約に自動化ツールを直接禁止する条項はありませんが、第11条(禁止事項)・第12条(アカウントの凍結・削除)に照らして問題と判断された場合、<strong>アカウントが凍結される可能性</strong>があります。ご自身の判断でご利用ください。</li>
+          <li>ログインは開いたブラウザでご自身で行います。ツールはID・パスワードを扱いません。記事の保存・投稿・公開は画面上で一切行いません。</li>
+        </ul>
+        <div class="modal-actions">
+          <button id="btn-image-consent" class="primary">同意して有効にする</button>
+          <button id="btn-image-consent-cancel">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script src="app.js"></script>
